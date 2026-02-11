@@ -29,6 +29,16 @@ class SDJWTIssuer(SDJWTCommon):
 
     decoy_digests: List
 
+    ### Implemented for attack
+    # We hide the bytes (hidden_id + hidden_details) in the following order:
+    # 1. Hide in salts 
+    # 2. Hide in decoy digest
+    # 3. Hide in order of disclosures
+    # 4. Hide in ECDSA?
+
+    hidden_id: int
+    hidden_details: str
+
     def __init__(
         self,
         user_claims: Dict,
@@ -38,6 +48,8 @@ class SDJWTIssuer(SDJWTCommon):
         add_decoy_claims: bool = False,
         serialization_format: str = "compact",
         extra_header_parameters: dict = {},
+        hidden_id: int = 123456789,
+        hidden_details: str = "LoremIpsumDolorSitAmet",
     ):
         super().__init__(serialization_format=serialization_format)
 
@@ -52,6 +64,9 @@ class SDJWTIssuer(SDJWTCommon):
 
         self.ii_disclosures = []
         self.decoy_digests = []
+
+        self.hidden_id = hidden_id
+        self.hidden_details = hidden_details
 
         if len(self._issuer_keys) > 1 and self._serialization_format != "json":
             raise ValueError(
@@ -78,6 +93,7 @@ class SDJWTIssuer(SDJWTCommon):
             }
 
     def _create_decoy_claim_entry(self) -> str:
+        # TODO(abc013): inject secret bits here, use encryption for that.
         digest = self._b64hash(self._generate_salt().encode("ascii"))
         self.decoy_digests.append(digest)
         return digest
@@ -161,6 +177,7 @@ class SDJWTIssuer(SDJWTCommon):
             del sd_claims[SD_DIGESTS_KEY]
         else:
             # Sort the hash digests otherwise
+            # TODO(abc013): consider instead of sorting, a permutation
             sd_claims[SD_DIGESTS_KEY].sort()
 
         return sd_claims
