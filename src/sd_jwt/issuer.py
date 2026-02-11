@@ -1,3 +1,4 @@
+import math
 import random
 from json import loads, dumps
 from typing import Dict, List, Union, override
@@ -16,6 +17,8 @@ from .disclosure import SDJWTDisclosure
 
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
+
+from .lehmer_code import unrank_permutation
 
 class SDJWTIssuer(SDJWTCommon):
     DECOY_MIN_ELEMENTS = 2
@@ -198,9 +201,15 @@ class SDJWTIssuer(SDJWTCommon):
         if len(sd_claims[SD_DIGESTS_KEY]) == 0:
             del sd_claims[SD_DIGESTS_KEY]
         else:
-            # Sort the hash digests otherwise
-            # TODO(abc013): consider instead of sorting, a permutation
-            sd_claims[SD_DIGESTS_KEY].sort()
+            # ORDER ATTACK: Use the permutation of digests to hide information. Note that we work on byte-level, thus there must be at least 256 combinations (>5!) such that we hide something.
+            # TODO: We need to be careful because the claims could be nested in another disclosure, thus locking them away from our access unless we have the respective disclosure.
+            bytes_to_hide = int(math.log2(math.factorial(len(sd_claims[SD_DIGESTS_KEY])))) // 8
+            if bytes_to_hide > 0:
+                detail_split_to_hide = self._next_hidden_bytes(bytes_to_hide)
+                sd_claims[SD_DIGESTS_KEY] = unrank_permutation(rank=int.from_bytes(detail_split_to_hide, byteorder="big"), values=sd_claims[SD_DIGESTS_KEY])
+                print(f"Hiding bytes {detail_split_to_hide} in the order of digests (amount: {len(sd_claims[SD_DIGESTS_KEY])})")
+            else:
+                sd_claims[SD_DIGESTS_KEY].sort()
 
         return sd_claims
 

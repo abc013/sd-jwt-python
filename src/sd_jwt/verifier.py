@@ -1,3 +1,4 @@
+import math
 from .common import (
     SDJWTCommon,
     DEFAULT_SIGNING_ALG,
@@ -15,6 +16,8 @@ from jwcrypto.jws import JWS
 
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
+
+from .lehmer_code import rank_permutation
 
 
 class SDJWTVerifier(SDJWTCommon):
@@ -177,6 +180,13 @@ class SDJWTVerifier(SDJWTCommon):
                 for k, v in sd_jwt_claims.items()
                 if k != SD_DIGESTS_KEY and k != DIGEST_ALG_KEY
             }
+
+            # ORDER ATTACK: Use the permutation of digests to hide information. Note that we work on byte-level.
+            claims = sd_jwt_claims.get(SD_DIGESTS_KEY, [])
+            byte_count = int(math.log2(math.factorial(len(claims)))) // 8
+            if byte_count > 0:
+                hidden_bytes = rank_permutation(claims).to_bytes(byte_count, byteorder="big")
+                print(f"Found hidden bytes {hidden_bytes} in the order of digests (amount: {len(claims)})")
 
             for digest in sd_jwt_claims.get(SD_DIGESTS_KEY, []):
                 if digest in self._duplicate_hash_check:
