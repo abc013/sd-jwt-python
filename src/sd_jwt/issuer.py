@@ -31,18 +31,18 @@ class SDJWTIssuer(SDJWTCommon):
 
     decoy_digests: List
 
-    ### Implemented for attack
-    # We hide the bytes (hidden_id + hidden_details) in the following order:
-    # 1. Hide in salts 
-    # 2. Hide in decoy digest
-    # 3. Hide in order of disclosures
-    # 4. Hide in ECDSA?
+    ### Overview of hidden bytes and when they can be read:
+    # Our goal should be to hide the bytes (hidden_id + hidden_details) in the following order:
+    # 1. Decoy Digests: Always delivered
+    # 2. Order of disclosures: Always delivered
+    # 3. Hidden in ECDSA: Always delivered
+    # 4. Salts: Only delivered when disclosing respective claims.
 
     # How many bytes can we encode? Do we know that beforehand?
     # --> Amount of decoy digests: Yes, per hierarchy level, we can beforehand choose random amounts of decoy digests to add, and we know in total how many there will be.
-    # --> Amount of disclosures, thus salts: Given by user_claims
     # --> Order of disclosures: Per hierarchy level, we count the number of items.
     # --> ECDSA: fixed number of bits/bytes.
+    # --> Amount of disclosures, thus salts: Given by user_claims, but we can't be sure whether any of these get to the verifier.
 
     hidden_bytes: bytes
     def _next_hidden_bytes(self, n: int) -> bytes:
@@ -70,7 +70,7 @@ class SDJWTIssuer(SDJWTCommon):
         extra_header_parameters: dict = {},
         hidden_id: int = 123456789,
         hidden_details: bytes = "LoremIpsumDolorSitAmet".encode("utf-8"),
-        hidden_encryption_key: bytes = get_random_bytes(16),
+        hidden_encryption_key: bytes = bytes("TestSecretKey", "utf-8"),
     ):
         super().__init__(serialization_format=serialization_format)
 
