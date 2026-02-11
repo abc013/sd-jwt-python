@@ -13,11 +13,16 @@ from typing import Dict, List, Union, Callable
 from jwcrypto.jwk import JWK
 from jwcrypto.jws import JWS
 
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
+
 
 class SDJWTVerifier(SDJWTCommon):
     _input_disclosures: List
     _hash_to_decoded_disclosure: Dict
     _hash_to_disclosure: Dict
+
+    hidden_encryption_key: bytes
 
     def __init__(
         self,
@@ -26,12 +31,17 @@ class SDJWTVerifier(SDJWTCommon):
         expected_aud: Union[str, None] = None,
         expected_nonce: Union[str, None] = None,
         serialization_format: str = "compact",
+        hidden_encryption_key: bytes = bytes("0123456789abcdef", "utf-8"),
     ):
         super().__init__(serialization_format=serialization_format)
+
+        self.hidden_encryption_key = hidden_encryption_key
 
         self._parse_sd_jwt(sd_jwt_presentation)
         self._create_hash_mappings(self._input_disclosures)
         self._verify_sd_jwt(cb_get_issuer_key)
+
+        self._get_bytes_from_disclosures()
 
         # expected aud and nonce either need to be both set or both None
         if expected_aud or expected_nonce:
@@ -45,6 +55,14 @@ class SDJWTVerifier(SDJWTCommon):
                 expected_aud,
                 expected_nonce,
             )
+
+    # SALT ATTACK: Retrieve salts from sent disclosures. Each is 16 bytes long.
+    def _get_bytes_from_disclosures(self):
+        for k, v in self._hash_to_decoded_disclosure.items():
+            salt = self._base64url_decode(v[0])
+            cipher = AES.new(self.hidden_encryption_key, AES.MODE_CBC, iv=b"\x00" * 16)
+            cleartext = cipher.decrypt(salt)
+            print(f"Got cleartext from salt {salt.hex()}, msg: {cleartext}")
 
     def get_verified_payload(self):
         return self._extract_sd_claims()

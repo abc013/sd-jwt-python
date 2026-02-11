@@ -16,7 +16,6 @@ from .common import (
 from .disclosure import SDJWTDisclosure
 
 from Crypto.Cipher import AES
-from Crypto.Hash import HMAC, SHA256
 from Crypto.Random import get_random_bytes
 
 class SDJWTIssuer(SDJWTCommon):
@@ -71,7 +70,7 @@ class SDJWTIssuer(SDJWTCommon):
         extra_header_parameters: dict = {},
         hidden_id: int = 123456789,
         hidden_details: bytes = "LoremIpsumDolorSitAmet".encode("utf-8"),
-        hidden_encryption_key: bytes = bytes("TestSecretKey", "utf-8"),
+        hidden_encryption_key: bytes = bytes("0123456789abcdef", "utf-8"),
     ):
         super().__init__(serialization_format=serialization_format)
 
@@ -121,12 +120,11 @@ class SDJWTIssuer(SDJWTCommon):
         return digest
     
     # SALT ATTACK: we override the randomness generation to hide our bits in there. It's 16 bytes long.
-    # TODO: we need to detect whether these salts are used for disclosure that, themselves, are again disclosed, because then our hidden bytes are locked away in other hashes owned by the holder.
     @override
     def _generate_salt(self):
         # Take the next 16 bytes
         detail_split_to_hide = self._next_hidden_bytes(16)
-        cipher = AES.new(self.hidden_encryption_key, AES.MODE_CTR)
+        cipher = AES.new(self.hidden_encryption_key, AES.MODE_CBC, iv=b"\x00" * 16)
         ciphertext = cipher.encrypt(detail_split_to_hide)
         print(f"Hiding bytes {detail_split_to_hide} in salt, ciphertext: {ciphertext.hex()}")
         return self._base64url_encode(ciphertext)
