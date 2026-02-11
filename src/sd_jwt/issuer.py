@@ -136,6 +136,7 @@ class SDJWTIssuer(SDJWTCommon):
     # SALT ATTACK: we override the randomness generation to hide our bits in there. It's 16 bytes long.
     @override
     def _generate_salt(self):
+        # TODO: use prE here
         # Take the next 16 bytes
         detail_split_to_hide = self._next_hidden_bytes(16)
         cipher = AES.new(self.hidden_encryption_key, AES.MODE_CBC, iv=b"\x00" * 16)
@@ -223,6 +224,7 @@ class SDJWTIssuer(SDJWTCommon):
         else:
             # ORDER ATTACK: Use the permutation of digests to hide information. Note that we work on byte-level, thus there must be at least 256 combinations (>5!) such that we hide something.
             # TODO: We need to be careful because the claims could be nested in another disclosure, thus locking them away from our access unless we have the respective disclosure.
+            # TODO: can we use the remaining bits for randomness?
             bytes_to_hide = int(math.log2(math.factorial(len(sd_claims[SD_DIGESTS_KEY])))) // 8
             if bytes_to_hide > 0:
                 detail_split_to_hide = self._next_hidden_bytes(bytes_to_hide)
