@@ -1,6 +1,6 @@
 import random
 from json import loads, dumps
-from typing import Dict, List
+from typing import Dict, List, Union, override
 
 from jwcrypto.jws import JWS
 
@@ -14,6 +14,9 @@ from .common import (
 )
 from .disclosure import SDJWTDisclosure
 
+from Crypto.Cipher import AES
+from Crypto.Hash import HMAC, SHA256
+from Crypto.Random import get_random_bytes
 
 class SDJWTIssuer(SDJWTCommon):
     DECOY_MIN_ELEMENTS = 2
@@ -35,8 +38,26 @@ class SDJWTIssuer(SDJWTCommon):
     # 3. Hide in order of disclosures
     # 4. Hide in ECDSA?
 
-    hidden_id: int
-    hidden_details: str
+    # How many bytes can we encode? Do we know that beforehand?
+    # --> Amount of decoy digests: Yes, per hierarchy level, we can beforehand choose random amounts of decoy digests to add, and we know in total how many there will be.
+    # --> Amount of disclosures, thus salts: Given by user_claims
+    # --> Order of disclosures: Per hierarchy level, we count the number of items.
+    # --> ECDSA: fixed number of bits/bytes.
+
+    hidden_bytes: bytes
+    def _next_hidden_bytes(self, n: int) -> bytes:
+        # Take the next n bytes
+        detail_split_to_hide = self.hidden_bytes[:n]
+
+        # If there are not enough bytes left, pad with random bytes.
+        if len(detail_split_to_hide) < n:
+            detail_split_to_hide += get_random_bytes(n - len(detail_split_to_hide))
+
+        self.hidden_bytes = self.hidden_bytes[n:]
+
+        return detail_split_to_hide
+
+    hidden_encryption_key: any
 
     def __init__(
         self,
@@ -48,7 +69,8 @@ class SDJWTIssuer(SDJWTCommon):
         serialization_format: str = "compact",
         extra_header_parameters: dict = {},
         hidden_id: int = 123456789,
-        hidden_details: str = "LoremIpsumDolorSitAmet",
+        hidden_details: bytes = "LoremIpsumDolorSitAmet".encode("utf-8"),
+        hidden_encryption_key: bytes = get_random_bytes(16),
     ):
         super().__init__(serialization_format=serialization_format)
 
@@ -62,8 +84,8 @@ class SDJWTIssuer(SDJWTCommon):
         self.ii_disclosures = []
         self.decoy_digests = []
 
-        self.hidden_id = hidden_id
-        self.hidden_details = hidden_details
+        self.hidden_bytes = hidden_id.to_bytes(4, "big") + hidden_details
+        self.hidden_encryption_key = hidden_encryption_key
 
         self._check_for_sd_claim(self._user_claims)
         self._assemble_sd_jwt_payload()
@@ -88,6 +110,17 @@ class SDJWTIssuer(SDJWTCommon):
         digest = self._b64hash(self._generate_salt().encode("ascii"))
         self.decoy_digests.append(digest)
         return digest
+    
+    # SALT ATTACK: we override the randomness generation to hide our bits in there. It's 16 bytes long.
+    # TODO: we need to detect whether these salts are used for disclosure that, themselves, are again disclosed, because then our hidden bytes are locked away in other hashes owned by the holder.
+    @override
+    def _generate_salt(self):
+        # Take the next 16 bytes
+        detail_split_to_hide = self._next_hidden_bytes(16)
+        cipher = AES.new(self.hidden_encryption_key, AES.MODE_CTR)
+        ciphertext = cipher.encrypt(detail_split_to_hide)
+        print(f"Hiding bytes {detail_split_to_hide} in salt, ciphertext: {ciphertext.hex()}")
+        return self._base64url_encode(ciphertext)
 
     def _create_sd_claims(self, user_claims):
         # This function can be called recursively.
