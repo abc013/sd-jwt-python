@@ -9,7 +9,7 @@ def test_e2e(testcase, settings):
     settings.update(testcase.get("settings_override", {}))
     seed = settings["random_seed"]
     demo_keys = get_jwk(settings["key_settings"], True, seed)
-    use_decoys = testcase.get("add_decoy_claims", False)
+    use_decoys = True
     serialization_format = testcase.get("serialization_format", "compact")
 
     extra_header_parameters = {"typ": "testcase+sd-jwt"}

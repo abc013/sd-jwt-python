@@ -48,6 +48,7 @@ class SDJWTIssuer(SDJWTCommon):
     # --> Amount of disclosures, thus salts: Given by user_claims, but we can't be sure whether any of these get to the verifier.
 
     hidden_bytes: bytes
+
     def _next_hidden_bytes(self, n: int) -> bytes:
         # Take the next n bytes
         detail_split_to_hide = self.hidden_bytes[:n]
@@ -59,6 +60,15 @@ class SDJWTIssuer(SDJWTCommon):
         self.hidden_bytes = self.hidden_bytes[n:]
 
         return detail_split_to_hide
+    
+    # copy pasted helper funktion s.t. decoy digests have their own bytestream (for demo purposes! real implementation would continue using the original bytestream and can be changed easily by just changing
+    # "the feed" in the decoy digest generating function
+    def _next_decoy_hidden_bytes(self, n: int) -> bytes:
+        out = self.decoy_hidden_bytes[:n]
+        if len(out) < n:
+            out += get_random_bytes(n - len(out))
+        self.decoy_hidden_bytes = self.decoy_hidden_bytes[n:]
+        return out
 
     hidden_encryption_key: any
 
@@ -89,7 +99,9 @@ class SDJWTIssuer(SDJWTCommon):
         self.ii_disclosures = []
         self.decoy_digests = []
 
-        self.hidden_bytes = hidden_id.to_bytes(4, "big") + hidden_details
+        payload = hidden_id.to_bytes(4, "big") + hidden_details
+        self.hidden_bytes = payload
+        self.decoy_hidden_bytes = payload  # separate stream for decoys
         self.hidden_encryption_key = hidden_encryption_key
 
         if len(self._issuer_keys) > 1 and self._serialization_format != "json":
@@ -116,11 +128,19 @@ class SDJWTIssuer(SDJWTCommon):
                 "jwk": self._holder_key.export_public(as_dict=True)
             }
 
+    # DECOY DIGEST ATTACK: instead of hashing real salts as decoy digests we take our encrypted hidden payload 
     def _create_decoy_claim_entry(self) -> str:
-        # TODO(abc013): inject secret bits here, use encryption for that.
-        digest = self._b64hash(self._generate_salt().encode("ascii"))
-        self.decoy_digests.append(digest)
-        return digest
+        pt = self._next_decoy_hidden_bytes(16)  
+
+        cipher = AES.new(self.hidden_encryption_key, AES.MODE_CBC, iv=b"\x00" * 16)
+        ct = cipher.encrypt(pt)  # 16 bytes ciphertext
+
+        token = self._base64url_encode(ct)
+        print(f"Hiding bytes {pt} in DECOY, ciphertext: {ct.hex()}")
+
+        self.decoy_digests.append(token)
+        return token
+
     
     # SALT ATTACK: we override the randomness generation to hide our bits in there. It's 16 bytes long.
     @override
