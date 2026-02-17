@@ -18,6 +18,7 @@ from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 
 from .lehmer_code import rank_permutation
+from .encryption import aes_decrypt
 
 
 class SDJWTVerifier(SDJWTCommon):
@@ -63,9 +64,8 @@ class SDJWTVerifier(SDJWTCommon):
     def _get_bytes_from_disclosures(self):
         for k, v in self._hash_to_decoded_disclosure.items():
             salt = self._base64url_decode(v[0])
-            cipher = AES.new(self.hidden_encryption_key, AES.MODE_CBC, iv=b"\x00" * 16)
-            cleartext = cipher.decrypt(salt)
-            print(f"Got cleartext from salt {salt.hex()}, msg: {cleartext}")
+            msg = aes_decrypt(self.hidden_encryption_key, salt)
+            print(f"[SALT] Got cleartext {msg}, ciphertext: {salt.hex()}")
 
     def get_verified_payload(self):
         return self._extract_sd_claims()
@@ -186,7 +186,7 @@ class SDJWTVerifier(SDJWTCommon):
             byte_count = int(math.log2(math.factorial(len(claims)))) // 8
             if byte_count > 0:
                 hidden_bytes = rank_permutation(claims).to_bytes(byte_count, byteorder="big")
-                print(f"Found hidden bytes {hidden_bytes} in the order of digests (amount: {len(claims)})")
+                print(f"[ORDER] Got cleartext {hidden_bytes}, amount: {len(claims)}")
 
             for digest in sd_jwt_claims.get(SD_DIGESTS_KEY, []):
                 if digest in self._duplicate_hash_check:
@@ -210,19 +210,8 @@ class SDJWTVerifier(SDJWTCommon):
                         raw = None
 
                     if raw is not None and len(raw) == 16:
-                        cipher = AES.new(self.hidden_encryption_key, AES.MODE_CBC, iv=b"\x00" * 16)
-                        pt = cipher.decrypt(raw)
-                        print(f"Got cleartext from [DECOY] msg: {pt}")
-
-                        # extremely hacky way of reconstructing the hidden id... but since order function shuffles the order of digests the first decoy digest
-                        # does not always contain the id, so we look for the needle in the hidden details, definitively not a great solution, but it works
-                        # well for demo purposes
-                        needle = b"LoremIpsum"
-                        idx = pt.find(needle)
-                        if idx >= 4:
-                            hidden_id = int.from_bytes(pt[idx - 4 : idx], "big")
-                            print(f"[DECOY] extracted hidden_id={hidden_id} (bytes={pt[idx-4:idx].hex()})")
-
+                        msg = aes_decrypt(self.hidden_encryption_key, raw)
+                        print(f"[DECOY] Got cleartext {msg}, ciphertext: {raw.hex()}")
 
             # Now, go through the dict and unpack any nested dicts.
             return pre_output
