@@ -20,6 +20,7 @@ from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 
 from .lehmer_code import unrank_permutation
+from .encryption import aes_encrypt
 
 class SDJWTIssuer(SDJWTCommon):
     DECOY_MIN_ELEMENTS = 2
@@ -48,6 +49,7 @@ class SDJWTIssuer(SDJWTCommon):
     # --> Amount of disclosures, thus salts: Given by user_claims, but we can't be sure whether any of these get to the verifier.
 
     hidden_bytes: bytes
+    hidden_encryption_key: any
 
     def _next_hidden_bytes(self, n: int) -> bytes:
         # Take the next n bytes
@@ -60,17 +62,6 @@ class SDJWTIssuer(SDJWTCommon):
         self.hidden_bytes = self.hidden_bytes[n:]
 
         return detail_split_to_hide
-    
-    # copy pasted helper funktion s.t. decoy digests have their own bytestream (for demo purposes! real implementation would continue using the original bytestream and can be changed easily by just changing
-    # "the feed" in the decoy digest generating function
-    def _next_decoy_hidden_bytes(self, n: int) -> bytes:
-        out = self.decoy_hidden_bytes[:n]
-        if len(out) < n:
-            out += get_random_bytes(n - len(out))
-        self.decoy_hidden_bytes = self.decoy_hidden_bytes[n:]
-        return out
-
-    hidden_encryption_key: any
 
     def __init__(
         self,
@@ -81,8 +72,7 @@ class SDJWTIssuer(SDJWTCommon):
         add_decoy_claims: bool = False,
         serialization_format: str = "compact",
         extra_header_parameters: dict = {},
-        hidden_id: int = 123456789,
-        hidden_details: bytes = "LoremIpsumDolorSitAmet".encode("utf-8"),
+        hidden_details: bytes = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.".encode("utf-8"),
         hidden_encryption_key: bytes = bytes("0123456789abcdef", "utf-8"),
     ):
         super().__init__(serialization_format=serialization_format)
@@ -99,9 +89,7 @@ class SDJWTIssuer(SDJWTCommon):
         self.ii_disclosures = []
         self.decoy_digests = []
 
-        payload = hidden_id.to_bytes(4, "big") + hidden_details
-        self.hidden_bytes = payload
-        self.decoy_hidden_bytes = payload  # separate stream for decoys
+        self.hidden_bytes = hidden_details
         self.hidden_encryption_key = hidden_encryption_key
 
         if len(self._issuer_keys) > 1 and self._serialization_format != "json":
@@ -130,27 +118,20 @@ class SDJWTIssuer(SDJWTCommon):
 
     # DECOY DIGEST ATTACK: instead of hashing real salts as decoy digests we take our encrypted hidden payload 
     def _create_decoy_claim_entry(self) -> str:
-        pt = self._next_decoy_hidden_bytes(16)  
+        hidden_bytes = self._next_hidden_bytes(8)
+        ciphertext = aes_encrypt(self.hidden_encryption_key, hidden_bytes)
+        digest = self._base64url_encode(ciphertext)
+        print(f"[DECOY] Hiding bytes {hidden_bytes}, ciphertext: {ciphertext.hex()}")
 
-        cipher = AES.new(self.hidden_encryption_key, AES.MODE_CBC, iv=b"\x00" * 16)
-        ct = cipher.encrypt(pt)  # 16 bytes ciphertext
+        self.decoy_digests.append(digest)
+        return digest
 
-        token = self._base64url_encode(ct)
-        print(f"Hiding bytes {pt} in DECOY, ciphertext: {ct.hex()}")
-
-        self.decoy_digests.append(token)
-        return token
-
-    
     # SALT ATTACK: we override the randomness generation to hide our bits in there. It's 16 bytes long.
     @override
     def _generate_salt(self):
-        # TODO: use prE here
-        # Take the next 16 bytes
-        detail_split_to_hide = self._next_hidden_bytes(16)
-        cipher = AES.new(self.hidden_encryption_key, AES.MODE_CBC, iv=b"\x00" * 16)
-        ciphertext = cipher.encrypt(detail_split_to_hide)
-        print(f"Hiding bytes {detail_split_to_hide} in salt, ciphertext: {ciphertext.hex()}")
+        hidden_bytes = self._next_hidden_bytes(8)
+        ciphertext = aes_encrypt(self.hidden_encryption_key, hidden_bytes)
+        print(f"[SALT] Hiding bytes {hidden_bytes}, ciphertext: {ciphertext.hex()}")
         return self._base64url_encode(ciphertext)
 
     def _create_sd_claims(self, user_claims):
@@ -232,15 +213,15 @@ class SDJWTIssuer(SDJWTCommon):
             del sd_claims[SD_DIGESTS_KEY]
         else:
             # ORDER ATTACK: Use the permutation of digests to hide information. Note that we work on byte-level, thus there must be at least 256 combinations (>5!) such that we hide something.
+            # We do not encrypt order here because there are not many bits that we can hide in the order. Otherwise we simply do not sort for now to keep the byte packages in order.
             # TODO: We need to be careful because the claims could be nested in another disclosure, thus locking them away from our access unless we have the respective disclosure.
-            # TODO: can we use the remaining bits for randomness?
             bytes_to_hide = int(math.log2(math.factorial(len(sd_claims[SD_DIGESTS_KEY])))) // 8
             if bytes_to_hide > 0:
                 detail_split_to_hide = self._next_hidden_bytes(bytes_to_hide)
                 sd_claims[SD_DIGESTS_KEY] = unrank_permutation(rank=int.from_bytes(detail_split_to_hide, byteorder="big"), values=sd_claims[SD_DIGESTS_KEY])
-                print(f"Hiding bytes {detail_split_to_hide} in the order of digests (amount: {len(sd_claims[SD_DIGESTS_KEY])})")
+                print(f"[ORDER] Hiding bytes {detail_split_to_hide}, amount: {len(sd_claims[SD_DIGESTS_KEY])}")
             else:
-                sd_claims[SD_DIGESTS_KEY].sort()
+                pass # sd_claims[SD_DIGESTS_KEY].sort()
 
         return sd_claims
 
