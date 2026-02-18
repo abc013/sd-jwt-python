@@ -14,12 +14,9 @@ from typing import Dict, List, Union, Callable
 from jwcrypto.jwk import JWK
 from jwcrypto.jws import JWS
 
-from Crypto.Cipher import AES
-from Crypto.Random import get_random_bytes
-
 from .lehmer_code import rank_permutation
 from .encryption import aes_decrypt
-
+from .subliminal_ecdsa import verify
 
 class SDJWTVerifier(SDJWTCommon):
     _input_disclosures: List
@@ -84,6 +81,7 @@ class SDJWTVerifier(SDJWTCommon):
             unverified_issuer, unverified_header_parameters
         )
         parsed_input_sd_jwt.verify(issuer_public_key, alg=sign_alg)
+        verify(parsed_input_sd_jwt, issuer_public_key, alg=sign_alg, hidden_encryption_key=self.hidden_encryption_key)
 
         self._sd_jwt_payload = loads(parsed_input_sd_jwt.payload.decode("utf-8"))
         # TODO: Check exp/nbf/iat

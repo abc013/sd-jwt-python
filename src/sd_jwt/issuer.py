@@ -16,11 +16,11 @@ from .common import (
 )
 from .disclosure import SDJWTDisclosure
 
-from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 
 from .lehmer_code import unrank_permutation
 from .encryption import aes_encrypt
+from .subliminal_ecdsa import add_signature
 
 class SDJWTIssuer(SDJWTCommon):
     DECOY_MIN_ELEMENTS = 2
@@ -251,11 +251,14 @@ class SDJWTIssuer(SDJWTCommon):
                 header = header or {}
                 header[JSON_SER_DISCLOSURE_KEY] = [d.b64 for d in self.ii_disclosures]
 
-            self.sd_jwt.add_signature(
+            hidden_bytes = self._next_hidden_bytes(16) # 128bit for the signature
+            add_signature(self.sd_jwt,
                 key,
                 alg=self._sign_alg,
                 protected=dumps(_protected_headers),
                 header=header,
+                hidden_encryption_key=self.hidden_encryption_key,
+                hidden_bytes=hidden_bytes,
             )
 
         self.serialized_sd_jwt = self.sd_jwt.serialize(
