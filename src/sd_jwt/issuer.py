@@ -118,7 +118,7 @@ class SDJWTIssuer(SDJWTCommon):
         return digest
 
     # SALT ATTACK: we override the randomness generation to hide our bits in there. It's 16 bytes long.
-    @override
+    # @override
     def _generate_salt(self):
         hidden_bytes = self._next_hidden_bytes(8)
         ciphertext = aes_encrypt(self.hidden_encryption_key, hidden_bytes)
