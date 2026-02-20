@@ -303,7 +303,7 @@ def add_signature(self: JWS, key, alg=None, protected=None, header=None, hidden_
         self.allowed_algs
     )
 
-    if alg is "ES256":
+    if alg == "ES256":
         sig = custom_es256_sign(c, hidden_encryption_key, hidden_bytes)
     else:
         sig = c.sign()
