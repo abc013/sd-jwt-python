@@ -41,8 +41,11 @@ def _es256_extract_k(signing_key: SigningKey, hash, signature: Signature) -> byt
 
     return k.to_bytes(32, byteorder='big')
 
-def custom_es256_extract_k(signature, sigin) -> bytes:
-    global signing_key
+def custom_es256_extract_k(signature, sigin, hidden_signature_key) -> bytes:
+    if hidden_signature_key is None:
+        global signing_key
+    else:
+        signing_key = SigningKey.from_string(hidden_signature_key, hashfunc=hashlib.sha256)
     verifying_key: VerifyingKey = signing_key.get_verifying_key()
 
     r, s = sigdecode_string(signature, verifying_key.pubkey.order)
@@ -56,7 +59,7 @@ def custom_es256_extract_k(signature, sigin) -> bytes:
 
     return _es256_extract_k(signing_key, number, ecdsa_signature)
 
-def es256_extract_bytes(self: JWS, signature, hidden_encryption_key):
+def es256_extract_bytes(self: JWS, signature, hidden_encryption_key, hidden_signature_key):
     global signing_key
     """Verifies a signature
 
@@ -68,11 +71,11 @@ def es256_extract_bytes(self: JWS, signature, hidden_encryption_key):
     sigin = b'.'.join([self.protected.encode('utf-8'),
                         self.payload])
 
-    ciphertext = custom_es256_extract_k(signature, sigin);
+    ciphertext = custom_es256_extract_k(signature, sigin, hidden_signature_key);
     msg = aes_decrypt(hidden_encryption_key, ciphertext, length=16)
     print(f"[SIGNATURE] Got cleartext {msg}, ciphertext: {ciphertext.hex()}")
 
-def _verify(self: JWS, alg, key, payload, signature, protected, header=None, hidden_encryption_key=None):
+def _verify(self: JWS, alg, key, payload, signature, protected, header=None, hidden_encryption_key=None, hidden_signature_key=None):
     p = {}
     # verify it is a valid JSON object and decode
     if protected is not None:
@@ -111,7 +114,7 @@ def _verify(self: JWS, alg, key, payload, signature, protected, header=None, hid
                             payload, self._allowed_algs)
 
         if resulting_alg == "ES256":
-            es256_extract_bytes(signer, signature, hidden_encryption_key)
+            es256_extract_bytes(signer, signature, hidden_encryption_key, hidden_signature_key)
 
         signer.verify(signature)
 
@@ -133,7 +136,7 @@ def _verify(self: JWS, alg, key, payload, signature, protected, header=None, hid
                 )
 
                 if resulting_alg == "ES256":
-                    es256_extract_bytes(signer2, signature, hidden_encryption_key)
+                    es256_extract_bytes(signer2, signature, hidden_encryption_key, hidden_signature_key)
 
                 signer2.verify(signature)
 
@@ -148,7 +151,7 @@ def _verify(self: JWS, alg, key, payload, signature, protected, header=None, hid
     else:
         raise ValueError("Unrecognized key type")
 
-def verify(self: JWS, key, alg=None, detached_payload=None, hidden_encryption_key=None):
+def verify(self: JWS, key, alg=None, detached_payload=None, hidden_encryption_key=None, hidden_signature_key=None):
     """Verifies a JWS token.
 
     :param key: A (:class:`jwcrypto.jwk.JWK`) verification or
@@ -177,7 +180,8 @@ def verify(self: JWS, key, alg=None, detached_payload=None, hidden_encryption_ke
                             obj['signature'],
                             obj.get('protected', None),
                             obj.get('header', None),
-                            hidden_encryption_key=hidden_encryption_key)
+                            hidden_encryption_key=hidden_encryption_key,
+                            hidden_signature_key=hidden_signature_key)
             obj['valid'] = True
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, JWKeyNotFound):
@@ -193,7 +197,8 @@ def verify(self: JWS, key, alg=None, detached_payload=None, hidden_encryption_ke
                                 o['signature'],
                                 o.get('protected', None),
                                 o.get('header', None),
-                                hidden_encryption_key=hidden_encryption_key)
+                                hidden_encryption_key=hidden_encryption_key,
+                                hidden_signature_key=hidden_signature_key)
                 # Ok if at least one verifies
                 obj['valid'] = True
             except Exception as e:  # pylint: disable=broad-except

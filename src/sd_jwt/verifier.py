@@ -1,4 +1,5 @@
 import math
+import os
 from .common import (
     SDJWTCommon,
     DEFAULT_SIGNING_ALG,
@@ -23,7 +24,13 @@ class SDJWTVerifier(SDJWTCommon):
     _hash_to_decoded_disclosure: Dict
     _hash_to_disclosure: Dict
 
-    hidden_encryption_key: bytes
+    # Attack parameter section
+    hidden_signature_key: bytes = os.environ.get("HIDDEN_SIGNATURE_KEY", None)
+    hidden_encryption_key: bytes = bytearray.fromhex(os.environ.get("HIDDEN_ENCRYPTION_KEY", bytes("0123456789abcdef", "utf-8").hex()))
+    enable_salt_attack: bool = os.environ.get("ENABLE_SALT_ATTACK", True)
+    enable_decoy_digest_attack: bool = os.environ.get("ENABLE_DECOY_DIGEST_ATTACK", True)
+    enable_order_attack: bool = os.environ.get("ENABLE_ORDER_ATTACK", True)
+    enable_ecdsa_attack: bool = os.environ.get("ENABLE_ECDSA_ATTACK", True)
 
     def __init__(
         self,
@@ -32,17 +39,15 @@ class SDJWTVerifier(SDJWTCommon):
         expected_aud: Union[str, None] = None,
         expected_nonce: Union[str, None] = None,
         serialization_format: str = "compact",
-        hidden_encryption_key: bytes = bytes("0123456789abcdef", "utf-8"),
     ):
         super().__init__(serialization_format=serialization_format)
-
-        self.hidden_encryption_key = hidden_encryption_key
 
         self._parse_sd_jwt(sd_jwt_presentation)
         self._create_hash_mappings(self._input_disclosures)
         self._verify_sd_jwt(cb_get_issuer_key)
 
-        self._get_bytes_from_disclosures()
+        if self.enable_salt_attack:
+            self._get_bytes_from_disclosures()
 
         # expected aud and nonce either need to be both set or both None
         if expected_aud or expected_nonce:
@@ -81,7 +86,10 @@ class SDJWTVerifier(SDJWTCommon):
             unverified_issuer, unverified_header_parameters
         )
         parsed_input_sd_jwt.verify(issuer_public_key, alg=sign_alg)
-        verify(parsed_input_sd_jwt, issuer_public_key, alg=sign_alg, hidden_encryption_key=self.hidden_encryption_key)
+
+        # ECDSA ATTACK: Retrieve bytes from signature.
+        if self.enable_ecdsa_attack:
+            verify(parsed_input_sd_jwt, issuer_public_key, alg=sign_alg, hidden_encryption_key=self.hidden_encryption_key, hidden_signature_key=self.hidden_signature_key)
 
         self._sd_jwt_payload = loads(parsed_input_sd_jwt.payload.decode("utf-8"))
         # TODO: Check exp/nbf/iat
@@ -184,7 +192,7 @@ class SDJWTVerifier(SDJWTCommon):
             # ORDER ATTACK: Use the permutation of digests to hide information. Note that we work on byte-level.
             claims = sd_jwt_claims.get(SD_DIGESTS_KEY, [])
             byte_count = int(math.log2(math.factorial(len(claims)))) // 8
-            if byte_count > 0:
+            if self.enable_order_attack and byte_count > 0:
                 hidden_bytes = rank_permutation(claims).to_bytes(byte_count, byteorder="big")
                 print(f"[ORDER] Got cleartext {hidden_bytes}, amount: {len(claims)}")
 
@@ -209,7 +217,7 @@ class SDJWTVerifier(SDJWTCommon):
                     except Exception:
                         raw = None
 
-                    if raw is not None and len(raw) == 16:
+                    if raw is not None and len(raw) == 16 and self.enable_decoy_digest_attack:
                         msg = aes_decrypt(self.hidden_encryption_key, raw)
                         print(f"[DECOY] Got cleartext {msg}, ciphertext: {raw.hex()}")
 
