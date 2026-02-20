@@ -1,8 +1,28 @@
-# SD-JWT Reference Implementation
+# Untraceability Attacks on the SD-JWT Reference Implementation
 
-This is the reference implementation of the [IETF SD-JWT specification](https://datatracker.ietf.org/doc/draft-ietf-oauth-selective-disclosure-jwt/) written in Python.
+This repository contains untraceability attacks for the [reference implementation](https://github.com/openwallet-foundation-labs/sd-jwt-python/) of the [IETF SD-JWT specification](https://datatracker.ietf.org/doc/draft-ietf-oauth-selective-disclosure-jwt/) written in Python.
 
-This implementation is used to generate the examples in the IETF SD-JWT specification and it can also be used in other projects for implementing SD-JWT.
+## Attacks
+
+We implemented the four attacks described in our paper "Batch-Issued Credentials", as described below:
+- *Salt manipulation attack.* We use the 16-Byte long salt to hide an 8-Byte long pseudo-randomly encrypted message per disclosure. This attack is undetectable. It can be toggled with the environment variable `ENABLE_SALT_ATTACK=[True|False]`.
+- *Decoy digest attack.* We use the 16-Byte long decoy digest hashes to hide an 8-Byte long pseudo-randomly encrypted message per digest. This attack is undetecable. It can be toggled with the environment variable `ENABLE_DECOY_DIGEST_ATTACK=[True|False]`.
+- *Order of digests attack.* As the standard allows for random shuffling of digests, we can encode information within the order of digests. Per digest array, a byte can be encoded if at least 6 attributes are present. While it is possible to make this attack undetectable, we decided not to do so for the sake of proving the concept because the amount of digests tends to be close to that number, thus not leaving much leeway for randomness. At least 9 attributes are required to undetectably hide one Byte of information. This attack can be toggled with the environment variable `ENABLE_ORDER_ATTACK=[True|False]`.
+- *ECDSA subliminal channel attack.* Due to the anamorphic properties of ECDSA, we are able hide 8 Byte of information within the k-parameter for the standard ES256 signature. This attack is undetectable, but requires the issuer to reveal the signing key to relying parties. It can be toggled with the environment variable `ENABLE_ECDSA_ATTACK=[True|False]` and requires that the environment variable `HIDDEN_SIGNATURE_KEY` is set to the signature private key in verifier instances.
+
+For all attacks, AES in GCM mode is used to hide the message. A 16-Byte symmetric key must be set in both issuer and verifier instances by providing it in hex format in the environment variable `HIDDEN_ENCRYPTION_KEY=[0xdeadbeefdeadbeefdeadbeefdeadbeef]`.
+The data that you want to hide can be set in `HIDDEN_DATA` in hex format.
+
+### Further Considerations
+- *Amount of encoded data.* We can determine beforehand how much information can be encoded by a credential, and, based on that, decide what kind of data should be embedded in it.
+- *Recursive selective disclosures.* There can be instances where some selective disclosures are nested within others, thus locking away potential hiding opportunities within the nesting. Depending on the amount of information that could be hidden, revealing the disclosure in the unnested hidden data enables to hide even more data. In this implementation, we do not consider nested disclosures when hiding information, thus potentially locking away some information.
+- *Order of digests.* When spreading information across digests, an indication of order is required per digest array, since the order of digests must be shuffled or sorted in some way. This reduces the amount of real information embeddable in the credential depending on the amount of digests.
+
+### How many bytes can we encode? Do we know that beforehand?
+-> Amount of decoy digests: Yes, per hierarchy level, we can beforehand choose random amounts of decoy digests to add, and we know in total how many there will be.
+-> Order of disclosures: Per hierarchy level, we count the number of items.
+-> ECDSA: fixed number of bits/bytes.
+-> Amount of disclosures, thus salts: Given by user_claims, but we can't be sure whether any of these get to the verifier.
 
 ## Setup
 
