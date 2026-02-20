@@ -1,4 +1,5 @@
 import math
+import os
 import random
 from json import dumps
 from typing import Dict, List, Union
@@ -51,6 +52,11 @@ class SDJWTIssuer(SDJWTCommon):
     hidden_bytes: bytes
     hidden_encryption_key: any
 
+    hidden_salts: bool
+    hidden_decoy_digests: bool
+    hidden_order: bool
+    hidden_ecdsa: bool
+
     def _next_hidden_bytes(self, n: int) -> bytes:
         # Take the next n bytes
         detail_split_to_hide = self.hidden_bytes[:n]
@@ -72,8 +78,6 @@ class SDJWTIssuer(SDJWTCommon):
         add_decoy_claims: bool = False,
         serialization_format: str = "compact",
         extra_header_parameters: dict = {},
-        hidden_details: bytes = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.".encode("utf-8"),
-        hidden_encryption_key: bytes = bytes("0123456789abcdef", "utf-8"),
     ):
         super().__init__(serialization_format=serialization_format)
 
@@ -89,8 +93,12 @@ class SDJWTIssuer(SDJWTCommon):
         self.ii_disclosures = []
         self.decoy_digests = []
 
-        self.hidden_bytes = hidden_details
-        self.hidden_encryption_key = hidden_encryption_key
+        self.hidden_bytes = os.environ.get("HIDDEN_BYTES", "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.".encode("utf-8"))
+        self.hidden_encryption_key = os.environ.get("HIDDEN_ENCRYPTION_KEY", bytes("0123456789abcdef", "utf-8"))
+        self.hidden_salts = os.environ.get("HIDDEN_SALTS", True)
+        self.hidden_decoy_digests = os.environ.get("HIDDEN_DECOY_DIGESTS", True)
+        self.hidden_order = os.environ.get("HIDDEN_ORDER", True)
+        self.hidden_ecdsa = os.environ.get("HIDDEN_ECDSA", True)
 
         if len(self._issuer_keys) > 1 and self._serialization_format != "json":
             raise ValueError(
@@ -118,6 +126,9 @@ class SDJWTIssuer(SDJWTCommon):
 
     # DECOY DIGEST ATTACK: instead of hashing real salts as decoy digests we take our encrypted hidden payload 
     def _create_decoy_claim_entry(self) -> str:
+        if not self.hidden_decoy_digests:
+            pass
+
         hidden_bytes = self._next_hidden_bytes(8)
         ciphertext = aes_encrypt(self.hidden_encryption_key, hidden_bytes)
         digest = self._base64url_encode(ciphertext)
@@ -129,6 +140,9 @@ class SDJWTIssuer(SDJWTCommon):
     # SALT ATTACK: we override the randomness generation to hide our bits in there. It's 16 bytes long.
     # @override
     def _generate_salt(self):
+        if not self.hidden_salts:
+            return super()._generate_salt()
+
         hidden_bytes = self._next_hidden_bytes(8)
         ciphertext = aes_encrypt(self.hidden_encryption_key, hidden_bytes)
         print(f"[SALT] Hiding bytes {hidden_bytes}, ciphertext: {ciphertext.hex()}")
@@ -216,7 +230,7 @@ class SDJWTIssuer(SDJWTCommon):
             # We do not encrypt order here because there are not many bits that we can hide in the order. Otherwise we simply do not sort for now to keep the byte packages in order.
             # TODO: We need to be careful because the claims could be nested in another disclosure, thus locking them away from our access unless we have the respective disclosure.
             bytes_to_hide = int(math.log2(math.factorial(len(sd_claims[SD_DIGESTS_KEY])))) // 8
-            if bytes_to_hide > 0:
+            if self.hidden_order and bytes_to_hide > 0:
                 detail_split_to_hide = self._next_hidden_bytes(bytes_to_hide)
                 sd_claims[SD_DIGESTS_KEY] = unrank_permutation(rank=int.from_bytes(detail_split_to_hide, byteorder="big"), values=sd_claims[SD_DIGESTS_KEY])
                 print(f"[ORDER] Hiding bytes {detail_split_to_hide}, amount: {len(sd_claims[SD_DIGESTS_KEY])}")
