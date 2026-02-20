@@ -222,14 +222,12 @@ def custom_es256_sign(self: JWSCore, hidden_encryption_key, hidden_bytes):
         # es256 has order in [0;2^256) range. We make our lives simple here and send 128bit information and 128bit randomness. If we get out of range, we simply reroll.
         signing_key = SigningKey.from_pem(self.key.export_to_pem(private_key=True, password=None), hashfunc=hashlib.sha256)
 
-        print(self.key.export_to_pem(private_key=True, password=None))
         k = signing_key.privkey.order + 1
         while k > signing_key.privkey.order or k <= 1:
             ciphertext = aes_encrypt(hidden_encryption_key, hidden_bytes, length=16)
             k = int.from_bytes(ciphertext, byteorder="big")
 
         signature = signing_key.sign(sigin, allow_truncate=False, k=k)
-        print(signature)
         print(f"[SIGNATURE] Hiding bytes {hidden_bytes}, ciphertext: {ciphertext.hex()}")
 
         return {'protected': self.protected,
