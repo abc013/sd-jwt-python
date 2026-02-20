@@ -2,7 +2,7 @@ import math
 import os
 import random
 from json import loads, dumps
-from typing import Dict, List, Union, override
+from typing import Dict, List, Union
 
 from jwcrypto.jws import JWS
 
