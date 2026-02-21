@@ -19,7 +19,7 @@ from .disclosure import SDJWTDisclosure
 from Crypto.Random import get_random_bytes
 
 from .lehmer_code import unrank_permutation
-from .encryption import aes_encrypt
+from .encryption_hkdf import aes_encrypt
 from .subliminal_ecdsa import add_signature
 
 class SDJWTIssuer(SDJWTCommon):
