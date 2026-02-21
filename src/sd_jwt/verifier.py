@@ -16,7 +16,7 @@ from jwcrypto.jwk import JWK
 from jwcrypto.jws import JWS
 
 from .lehmer_code import rank_permutation
-from .encryption import aes_decrypt
+from .encryption_hkdf import aes_decrypt
 from .subliminal_ecdsa import verify
 
 class SDJWTVerifier(SDJWTCommon):
