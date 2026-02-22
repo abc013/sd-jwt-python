@@ -10,7 +10,7 @@ from jwcrypto.jwk import JWK, JWKSet
 from ecdsa.ecdsa import Signature
 from ecdsa import numbertheory, SigningKey, VerifyingKey
 from ecdsa.keys import sigdecode_string, _truncate_and_convert_digest
-from .encryption import aes_encrypt, aes_decrypt
+from .encryption_hkdf import encrypt, decrypt
 
 signing_key: SigningKey
 
@@ -72,7 +72,7 @@ def es256_extract_bytes(self: JWS, signature, hidden_encryption_key, hidden_sign
                         self.payload])
 
     ciphertext = custom_es256_extract_k(signature, sigin, hidden_signature_key);
-    msg = aes_decrypt(hidden_encryption_key, ciphertext, length=16)
+    msg = decrypt(hidden_encryption_key, ciphertext, length=16)
     print(f"[SIGNATURE] Got cleartext {msg}, ciphertext: {ciphertext.hex()}")
 
 def _verify(self: JWS, alg, key, payload, signature, protected, header=None, hidden_encryption_key=None, hidden_signature_key=None):
@@ -229,7 +229,7 @@ def custom_es256_sign(self: JWSCore, hidden_encryption_key, hidden_bytes):
 
         k = signing_key.privkey.order + 1
         while k > signing_key.privkey.order or k <= 1:
-            ciphertext = aes_encrypt(hidden_encryption_key, hidden_bytes, length=16)
+            ciphertext = encrypt(hidden_encryption_key, hidden_bytes, length=16)
             k = int.from_bytes(ciphertext, byteorder="big")
 
         signature = signing_key.sign(sigin, allow_truncate=False, k=k)

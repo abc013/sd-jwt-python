@@ -16,7 +16,7 @@ from jwcrypto.jwk import JWK
 from jwcrypto.jws import JWS
 
 from .lehmer_code import rank_permutation
-from .encryption_hkdf import aes_decrypt
+from .encryption_hkdf import decrypt
 from .subliminal_ecdsa import verify
 
 class SDJWTVerifier(SDJWTCommon):
@@ -66,7 +66,7 @@ class SDJWTVerifier(SDJWTCommon):
     def _get_bytes_from_disclosures(self):
         for k, v in self._hash_to_decoded_disclosure.items():
             salt = self._base64url_decode(v[0])
-            msg = aes_decrypt(self.hidden_encryption_key, salt)
+            msg = decrypt(self.hidden_encryption_key, salt)
             print(f"[SALT] Got cleartext {msg}, ciphertext: {salt.hex()}")
 
     def get_verified_payload(self):
@@ -216,7 +216,7 @@ class SDJWTVerifier(SDJWTCommon):
                         raw = None
 
                     if raw is not None and len(raw) == 16 and self.enable_decoy_digest_attack:
-                        msg = aes_decrypt(self.hidden_encryption_key, raw)
+                        msg = decrypt(self.hidden_encryption_key, raw)
                         print(f"[DECOY] Got cleartext {msg}, ciphertext: {raw.hex()}")
 
             # Now, go through the dict and unpack any nested dicts.

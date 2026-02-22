@@ -19,7 +19,7 @@ from .disclosure import SDJWTDisclosure
 from Crypto.Random import get_random_bytes
 
 from .lehmer_code import unrank_permutation
-from .encryption_hkdf import aes_encrypt
+from .encryption_hkdf import encrypt
 from .subliminal_ecdsa import add_signature
 
 class SDJWTIssuer(SDJWTCommon):
@@ -97,7 +97,7 @@ class SDJWTIssuer(SDJWTCommon):
     def _create_decoy_claim_entry(self) -> str:
         if self.enable_decoy_digest_attack:
             hidden_bytes = self._next_hidden_bytes(8)
-            ciphertext = aes_encrypt(self.hidden_encryption_key, hidden_bytes)
+            ciphertext = encrypt(self.hidden_encryption_key, hidden_bytes)
             digest = self._base64url_encode(ciphertext)
             print(f"[DECOY] Hiding bytes {hidden_bytes}, ciphertext: {ciphertext.hex()}")
         else:
@@ -112,7 +112,7 @@ class SDJWTIssuer(SDJWTCommon):
             return super()._generate_salt()
 
         hidden_bytes = self._next_hidden_bytes(8)
-        ciphertext = aes_encrypt(self.hidden_encryption_key, hidden_bytes)
+        ciphertext = encrypt(self.hidden_encryption_key, hidden_bytes)
         print(f"[SALT] Hiding bytes {hidden_bytes}, ciphertext: {ciphertext.hex()}")
         return self._base64url_encode(ciphertext)
 
