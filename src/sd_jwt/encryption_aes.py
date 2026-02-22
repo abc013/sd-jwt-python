@@ -1,7 +1,7 @@
 from Crypto.Random import get_random_bytes
 from Crypto.Cipher import AES
 
-def aes_encrypt(key: bytes, msg: bytes, length: int = 8):
+def encrypt(key: bytes, msg: bytes, length: int = 8):
     assert(len(msg) == length)
 
     randomness = get_random_bytes(length)
@@ -11,7 +11,7 @@ def aes_encrypt(key: bytes, msg: bytes, length: int = 8):
 
     return randomness + ct
 
-def aes_decrypt(key: bytes, ciphertext: bytes, length: int = 8):
+def decrypt(key: bytes, ciphertext: bytes, length: int = 8):
     randomness = ciphertext[:length]
     msg = ciphertext[length:]
 
