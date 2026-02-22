@@ -16,7 +16,7 @@ The data that you want to hide can be set in `HIDDEN_DATA` in hex format.
 ### Further Considerations
 - *Amount of encoded data.* We can determine beforehand how much information can be encoded by a credential, and, based on that, decide what kind of data should be embedded in it.
 - *Recursive selective disclosures.* There can be instances where some selective disclosures are nested within others, thus locking away potential hiding opportunities within the nesting. Depending on the amount of information that could be hidden, revealing the disclosure in the unnested hidden data enables to hide even more data. In this implementation, we do not consider nested disclosures when hiding information, thus potentially locking away some information.
-- *Order of digests.* When spreading information across digests, an indication of order is required per digest array, since the order of digests must be shuffled or sorted in some way. This reduces the amount of real information embeddable in the credential depending on the amount of digests.
+- *Order of digests.* When spreading information across digests, an indication of order is required per digest array, since by default, the order of digests is sorted (note that sorting or shuffling is required by standard; when using shuffling, we can shuffle the disclosures first before adding the malicious salts and we do not require an indication of order). This reduces the amount of real information embeddable in the credential depending on the amount of digests.
 
 ### How many bytes can we encode? Do we know that beforehand?
 -> Amount of decoy digests: Yes, per hierarchy level, we can beforehand choose random amounts of decoy digests to add, and we know in total how many there will be.
