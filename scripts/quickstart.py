@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Run one tracing channel in separate issuance/presentation/verification steps."""
+
+# Copyright 2026 Andreas Franke, Kurt-Kester Leißering, Karla Friedrichs
+
 import argparse
 import json
 from pathlib import Path

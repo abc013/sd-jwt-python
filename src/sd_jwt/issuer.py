@@ -1,3 +1,6 @@
+# Copyright 2026 Daniel Fett
+# Copyright 2026 Andreas Franke, Kurt-Kester Leißering, Karla Friedrichs
+
 import math
 import os
 import secrets

@@ -1,3 +1,5 @@
+# Copyright 2026 Daniel Fett
+
 import pytest
 import io
 

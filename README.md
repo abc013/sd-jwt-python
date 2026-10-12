@@ -1,6 +1,8 @@
 # Demonstration of Attacks on Weak Untraceability of the SD-JWT Reference Implementation
 
-This repository implements the four attacks described in the paper "Invisible Traces: Subversion Attacks on Batch-Issued Credentials", targeting weak untraceability of the [reference implementation](https://github.com/openwallet-foundation-labs/sd-jwt-python/) of the [IETF SD-JWT specification](https://datatracker.ietf.org/doc/draft-ietf-oauth-selective-disclosure-jwt/) written in Python.
+This repository implements the four attacks described in the paper "Invisible Traces: Subversion Attacks on Batch-Issued Credentials", targeting weak untraceability.
+
+We built this demo on top of the [reference implementation](https://github.com/openwallet-foundation-labs/sd-jwt-python/) of the [IETF SD-JWT specification](https://datatracker.ietf.org/doc/draft-ietf-oauth-selective-disclosure-jwt/) written in Python. 
 
 ## Quickstart
 

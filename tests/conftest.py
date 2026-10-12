@@ -1,3 +1,5 @@
+# Copyright 2026 Daniel Fett
+
 from pathlib import Path
 import pytest
 

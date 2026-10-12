@@ -1,3 +1,5 @@
+# Copyright 2026 Daniel Fett
+
 import logging
 
 from .common import (

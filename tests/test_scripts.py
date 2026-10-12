@@ -1,3 +1,5 @@
+# Copyright 2026 Daniel Fett
+
 # This test attempts to run the script sd-jwt-generate from the command line to see if the script runs without errors.
 # Note: The script must be run from the "examples" directory.
 

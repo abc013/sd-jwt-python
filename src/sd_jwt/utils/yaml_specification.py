@@ -1,3 +1,5 @@
+# Copyright 2026 Daniel Fett
+
 from sd_jwt.common import SDObj
 import yaml
 import sys

@@ -170,4 +170,6 @@ examples/*/*
 !examples/*/specification.yml
 
 # Ignore quickstart output
-quickstart-output/
+quickstart-output
+
+.vscode

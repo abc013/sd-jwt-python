@@ -1,3 +1,5 @@
+# Copyright 2026 Andreas Franke, Kurt-Kester Leißering, Karla Friedrichs
+
 from Crypto.Random import get_random_bytes
 from Crypto.Cipher import AES
 

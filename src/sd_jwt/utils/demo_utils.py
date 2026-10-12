@@ -1,3 +1,5 @@
+# Copyright 2026 Daniel Fett
+
 import base64
 import json
 import logging
