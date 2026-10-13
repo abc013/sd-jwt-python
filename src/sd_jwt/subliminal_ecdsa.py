@@ -1,5 +1,12 @@
+# Copyright 2026 Andreas Franke, Kurt-Kester Leißering, Karla Friedrichs
 
 import hashlib
+
+import hmac
+import secrets
+
+from ecdsa import NIST256p
+from ecdsa.ellipticcurve import INFINITY
 
 from jwcrypto.common import base64url_decode, base64url_encode
 from jwcrypto.common import json_decode, json_encode
@@ -7,75 +14,75 @@ from jwcrypto.jws import JWS, InvalidJWSObject, JWSCore, InvalidJWSSignature
 from jwcrypto.common import JWKeyNotFound
 from jwcrypto.jwk import JWK, JWKSet
 
-from ecdsa.ecdsa import Signature
 from ecdsa import numbertheory, SigningKey, VerifyingKey
-from ecdsa.keys import sigdecode_string, _truncate_and_convert_digest
-from .encryption_hkdf import encrypt, decrypt
+from ecdsa.keys import sigdecode_string
 
-signing_key: SigningKey
+ECDSA_MESSAGE_BYTES = 1
+ECDSA_MAX_TRIALS = 8192
+
+#######################################################################################################################################
+# PRF
+#######################################################################################################################################
+
+def tracing_prf(key, point):
+    """HMAC-SHA256 truncated to the tracing-message length."""
+    # Canonical compressed P-256 point encoding; includes both coordinates
+    # through x and the parity of y.
+    encoded_point = (
+        bytes([2 + (int(point.y()) & 1)])
+        + int(point.x()).to_bytes(32, "big")
+    )
+    return hmac.new(
+        bytes(key),
+        b"sd-jwt-ecdsa-tracing-v1\x00" + encoded_point,
+        hashlib.sha256,
+    ).digest()[:ECDSA_MESSAGE_BYTES]
+
 
 #######################################################################################################################################
 # Extracting
 #######################################################################################################################################
 
-def _es256_extract_k(signing_key: SigningKey, hash, signature: Signature) -> bytes:
-    G = signing_key.privkey.public_key.generator
-    n = G.order()
-    r = signature.r
-    s = signature.s
-    if r < 1 or r > n - 1:
-        return False
-    if s < 1 or s > n - 1:
-        return False
+def es256_extract_bytes(
+    self: JWSCore,
+    signature,
+    hidden_encryption_key
+):
+    verifying_key = VerifyingKey.from_pem(
+        self.key.export_to_pem(private_key=False),
+        hashfunc=hashlib.sha256,
+    )
+    if verifying_key.curve != NIST256p:
+        raise ValueError("This tracing implementation requires P-256")
 
-    c = numbertheory.inverse_mod(s, n)
-    u1 = (hash * c) % n
-    u2 = (r * c) % n
-    if hasattr(G, "mul_add"):
-        xy = G.mul_add(u1, signing_key.privkey.public_key.point, u2)
-    else:
-        xy = u1 * G + u2 * signing_key.privkey.public_key.point
-    v = xy.x() % n
+    generator = verifying_key.curve.generator
+    order = generator.order()
+    public_point = verifying_key.pubkey.point
 
-    k = c * (hash + r * signing_key.privkey.secret_multiplier) % n
+    r, s = sigdecode_string(signature, order)
+    if not (1 <= r < order and 1 <= s < order):
+        raise InvalidJWSSignature("Invalid ECDSA signature scalars")
 
-    return k.to_bytes(32, byteorder='big')
+    sigin = b".".join([
+        self.protected.encode("utf-8"),
+        self.payload,
+    ])
+    z = int.from_bytes(hashlib.sha256(sigin).digest(), "big")
+    s_inverse = numbertheory.inverse_mod(s, order)
 
-def custom_es256_extract_k(signature, sigin, hidden_signature_key) -> bytes:
-    if hidden_signature_key is None:
-        global signing_key
-    else:
-        signing_key = SigningKey.from_string(hidden_signature_key, hashfunc=hashlib.sha256)
-    verifying_key: VerifyingKey = signing_key.get_verifying_key()
-
-    r, s = sigdecode_string(signature, verifying_key.pubkey.order)
-    ecdsa_signature = Signature(r, s)
-
-    number = _truncate_and_convert_digest(
-        hashlib.sha256(sigin).digest(),
-        verifying_key.curve,
-        False,
+    # R = (H(m)/s)G + (r/s)Q
+    point = (
+        ((z * s_inverse) % order) * generator
+        + ((r * s_inverse) % order) * public_point
     )
 
-    return _es256_extract_k(signing_key, number, ecdsa_signature)
+    if point == INFINITY or int(point.x()) % order != r:
+        raise InvalidJWSSignature("Invalid reconstructed ECDSA point")
 
-def es256_extract_bytes(self: JWS, signature, hidden_encryption_key, hidden_signature_key):
-    global signing_key
-    """Verifies a signature
+    message = tracing_prf(hidden_encryption_key, point)
+    print(f"[SIGNATURE] Got cleartext {message}")
 
-    :raises InvalidJWSSignature: if the verification fails.
-
-    :return: Returns True or an Exception
-    :rtype: `bool`
-    """
-    sigin = b'.'.join([self.protected.encode('utf-8'),
-                        self.payload])
-
-    ciphertext = custom_es256_extract_k(signature, sigin, hidden_signature_key);
-    msg = decrypt(hidden_encryption_key, ciphertext, length=16)
-    print(f"[SIGNATURE] Got cleartext {msg}, ciphertext: {ciphertext.hex()}")
-
-def _verify(self: JWS, alg, key, payload, signature, protected, header=None, hidden_encryption_key=None, hidden_signature_key=None):
+def _verify(self: JWS, alg, key, payload, signature, protected, header=None, hidden_encryption_key=None):
     p = {}
     # verify it is a valid JSON object and decode
     if protected is not None:
@@ -113,10 +120,10 @@ def _verify(self: JWS, alg, key, payload, signature, protected, header=None, hid
         signer = JWSCore(resulting_alg, key, protected,
                             payload, self._allowed_algs)
 
-        if resulting_alg == "ES256":
-            es256_extract_bytes(signer, signature, hidden_encryption_key, hidden_signature_key)
-
         signer.verify(signature)
+
+        if resulting_alg == "ES256":
+            es256_extract_bytes(signer, signature, hidden_encryption_key)
 
         self.verifylog.append("Success")
     elif isinstance(key, JWKSet):
@@ -135,10 +142,10 @@ def _verify(self: JWS, alg, key, payload, signature, protected, header=None, hid
                     payload, self._allowed_algs
                 )
 
-                if resulting_alg == "ES256":
-                    es256_extract_bytes(signer2, signature, hidden_encryption_key, hidden_signature_key)
-
                 signer2.verify(signature)
+
+                if resulting_alg == "ES256":
+                    es256_extract_bytes(signer2, signature, hidden_encryption_key)
 
                 self.verifylog.append("Success")
                 break
@@ -151,7 +158,7 @@ def _verify(self: JWS, alg, key, payload, signature, protected, header=None, hid
     else:
         raise ValueError("Unrecognized key type")
 
-def verify(self: JWS, key, alg=None, detached_payload=None, hidden_encryption_key=None, hidden_signature_key=None):
+def verify(self: JWS, key, alg=None, detached_payload=None, hidden_encryption_key=None):
     """Verifies a JWS token.
 
     :param key: A (:class:`jwcrypto.jwk.JWK`) verification or
@@ -180,8 +187,7 @@ def verify(self: JWS, key, alg=None, detached_payload=None, hidden_encryption_ke
                             obj['signature'],
                             obj.get('protected', None),
                             obj.get('header', None),
-                            hidden_encryption_key=hidden_encryption_key,
-                            hidden_signature_key=hidden_signature_key)
+                            hidden_encryption_key=hidden_encryption_key)
             obj['valid'] = True
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, JWKeyNotFound):
@@ -197,8 +203,7 @@ def verify(self: JWS, key, alg=None, detached_payload=None, hidden_encryption_ke
                                 o['signature'],
                                 o.get('protected', None),
                                 o.get('header', None),
-                                hidden_encryption_key=hidden_encryption_key,
-                                hidden_signature_key=hidden_signature_key)
+                                hidden_encryption_key=hidden_encryption_key)
                 # Ok if at least one verifies
                 obj['valid'] = True
             except Exception as e:  # pylint: disable=broad-except
@@ -219,25 +224,69 @@ def verify(self: JWS, key, alg=None, detached_payload=None, hidden_encryption_ke
 #######################################################################################################################################
 
 def custom_es256_sign(self: JWSCore, hidden_encryption_key, hidden_bytes):
-        global signing_key
+    if len(hidden_bytes) != ECDSA_MESSAGE_BYTES:
+        raise ValueError(
+            f"ECDSA tracing requires {ECDSA_MESSAGE_BYTES} message byte(s)"
+        )
 
-        sigin = b'.'.join([self.protected.encode('utf-8'),
-                           self.payload])
+    signing_key = SigningKey.from_pem(
+        self.key.export_to_pem(private_key=True, password=None),
+        hashfunc=hashlib.sha256,
+    )
+    if signing_key.curve != NIST256p:
+        raise ValueError("This tracing implementation requires P-256")
 
-        # es256 has order in [0;2^256) range. We make our lives simple here and send 128bit information and 128bit randomness. If we get out of range, we simply reroll.
-        signing_key = SigningKey.from_pem(self.key.export_to_pem(private_key=True, password=None), hashfunc=hashlib.sha256)
+    generator = signing_key.curve.generator
+    order = generator.order()
 
-        k = signing_key.privkey.order + 1
-        while k > signing_key.privkey.order or k <= 1:
-            ciphertext = encrypt(hidden_encryption_key, hidden_bytes, length=16)
-            k = int.from_bytes(ciphertext, byteorder="big")
+    first_nonce = None
+    selected_nonce = None
+    matched = False
 
-        signature = signing_key.sign(sigin, allow_truncate=False, k=k)
-        print(f"[SIGNATURE] Hiding bytes {hidden_bytes}, ciphertext: {ciphertext.hex()}")
+    # rejection sample the PRF
+    for attempt in range(1, ECDSA_MAX_TRIALS + 1):
+        nonce = secrets.randbelow(order - 1) + 1
+        if first_nonce is None:
+            first_nonce = nonce
 
-        return {'protected': self.protected,
-                'payload': self.payload,
-                'signature': base64url_encode(signature)}
+        point = nonce * generator
+        if tracing_prf(hidden_encryption_key, point) == hidden_bytes:
+            selected_nonce = nonce
+            matched = True
+            break
+
+    # failure
+    if not matched:
+        # The paper specifies using the first sampled nonce on failure.
+        selected_nonce = first_nonce
+
+    sigin = b".".join([
+        self.protected.encode("utf-8"),
+        self.payload,
+    ])
+    signature = signing_key.sign(
+        sigin,
+        hashfunc=hashlib.sha256,
+        allow_truncate=False,
+        k=selected_nonce,
+    )
+
+    if matched:
+        print(
+            f"[SIGNATURE] Hiding bytes {hidden_bytes}, "
+            f"trials: {attempt}"
+        )
+    else:
+        print(
+            f"[SIGNATURE] No match after {ECDSA_MAX_TRIALS} trials; "
+            "using the first nonce. Tracing recovery may fail."
+        )
+
+    return {
+        "protected": self.protected,
+        "payload": self.payload,
+        "signature": base64url_encode(signature),
+    }
 
 def add_signature(self: JWS, key, alg=None, protected=None, header=None, hidden_encryption_key=None, hidden_bytes=None):
     """Adds a new signature to the object.

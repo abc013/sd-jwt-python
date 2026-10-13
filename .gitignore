@@ -168,3 +168,8 @@ tests/testcases/*/*
 # Ignore output of examples except for specification.yml
 examples/*/*
 !examples/*/specification.yml
+
+# Ignore quickstart output
+quickstart-output
+
+.vscode

@@ -1,3 +1,5 @@
+# Copyright 2026 Andreas Franke, Kurt-Kester Leißering, Karla Friedrichs
+
 from math import factorial
 
 class Fenwick:

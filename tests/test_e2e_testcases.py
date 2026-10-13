@@ -1,3 +1,6 @@
+# Copyright 2026 Daniel Fett
+# Copyright 2026 Andreas Franke, Kurt-Kester Leißering, Karla Friedrichs
+
 from sd_jwt import __version__
 from sd_jwt.holder import SDJWTHolder
 from sd_jwt.issuer import SDJWTIssuer

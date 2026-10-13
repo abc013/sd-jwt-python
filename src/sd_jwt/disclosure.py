@@ -1,3 +1,5 @@
+# Copyright 2026 Daniel Fett
+
 from dataclasses import dataclass
 from json import dumps
 from typing import Optional

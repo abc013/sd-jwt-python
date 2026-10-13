@@ -1,6 +1,9 @@
+# Copyright 2026 Daniel Fett
+# Copyright 2026 Andreas Franke, Kurt-Kester Leißering, Karla Friedrichs
+
 import math
 import os
-import random
+import secrets
 from json import dumps
 from typing import Dict, List, Union
 
@@ -21,11 +24,10 @@ from Crypto.Random import get_random_bytes
 
 from .lehmer_code import unrank_permutation
 from .encryption_hkdf import encrypt
-from .subliminal_ecdsa import add_signature
+from .subliminal_ecdsa import add_signature, ECDSA_MESSAGE_BYTES
 
 class SDJWTIssuer(SDJWTCommon):
-    DECOY_MIN_ELEMENTS = 2
-    DECOY_MAX_ELEMENTS = 5
+    MAX_DIGEST_COUNT = 10 # upper limit of attributes in a credential
 
     sd_jwt_payload: Dict
     sd_jwt: JWS
@@ -39,10 +41,10 @@ class SDJWTIssuer(SDJWTCommon):
     # Attack parameter section
     hidden_data: bytes = bytearray.fromhex(os.environ.get("HIDDEN_DATA", "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.".encode("utf-8").hex()))
     hidden_encryption_key: bytes = bytearray.fromhex(os.environ.get("HIDDEN_ENCRYPTION_KEY", bytes("0123456789abcdef", "utf-8").hex()))
-    enable_salt_attack: bool = os.environ.get("ENABLE_SALT_ATTACK", True)
-    enable_decoy_digest_attack: bool = os.environ.get("ENABLE_DECOY_DIGEST_ATTACK", True)
-    enable_order_attack: bool = os.environ.get("ENABLE_ORDER_ATTACK", True)
-    enable_ecdsa_attack: bool = os.environ.get("ENABLE_ECDSA_ATTACK", True)
+    enable_salt_attack: bool = os.environ.get("ENABLE_SALT_ATTACK", "true").strip().lower() == "true"
+    enable_decoy_digest_attack: bool = os.environ.get("ENABLE_DECOY_DIGEST_ATTACK", "true").strip().lower() == "true"
+    enable_order_attack: bool = os.environ.get("ENABLE_ORDER_ATTACK", "true").strip().lower() == "true"
+    enable_ecdsa_attack: bool = os.environ.get("ENABLE_ECDSA_ATTACK", "true").strip().lower() == "true"
 
     def _next_hidden_bytes(self, n: int) -> bytes:
         next_bytes = self.hidden_data[:n]
@@ -64,6 +66,17 @@ class SDJWTIssuer(SDJWTCommon):
         serialization_format: str = "compact",
         extra_header_parameters: dict = {},
     ):
+        attribute_count = sum(
+            isinstance(key, SDObj)
+            for key in user_claims
+        )
+
+        if attribute_count > self.MAX_DIGEST_COUNT:
+            raise ValueError(
+                f"Issuance allows at most {self.MAX_DIGEST_COUNT} selectively "
+                f"disclosable top-level attributes; received {attribute_count}."
+            )
+
         super().__init__(serialization_format=serialization_format)
 
         self._user_claims = user_claims
@@ -105,12 +118,12 @@ class SDJWTIssuer(SDJWTCommon):
     # DECOY DIGEST ATTACK: instead of hashing real salts as decoy digests we take our encrypted hidden payload 
     def _create_decoy_claim_entry(self) -> str:
         if self.enable_decoy_digest_attack:
-            hidden_bytes = self._next_hidden_bytes(8)
-            ciphertext = encrypt(self.hidden_encryption_key, hidden_bytes)
+            hidden_bytes = self._next_hidden_bytes(16)
+            ciphertext = encrypt(self.hidden_encryption_key, hidden_bytes, length=16)
             digest = self._base64url_encode(ciphertext)
             print(f"[DECOY] Hiding bytes {hidden_bytes}, ciphertext: {ciphertext.hex()}")
         else:
-            digest = self._b64hash(self._generate_salt().encode("ascii"))
+            digest = self._b64hash(super()._generate_salt().encode("ascii"))
 
         self.decoy_digests.append(digest)
         return digest
@@ -192,27 +205,64 @@ class SDJWTIssuer(SDJWTCommon):
             else:
                 sd_claims[key] = subtree_from_here
 
-        # Add decoy claims if requested
+        # Add decoy claims if there are less than MAX_DIGEST_COUNT attributes in the credential
         if self._add_decoy_claims:
-            for _ in range(
-                random.randint(self.DECOY_MIN_ELEMENTS, self.DECOY_MAX_ELEMENTS)
-            ):
+            num_decoys = max(
+                0,
+                self.MAX_DIGEST_COUNT - len(sd_claims[SD_DIGESTS_KEY]),
+            )
+            for _ in range(num_decoys):
                 sd_claims[SD_DIGESTS_KEY].append(self._create_decoy_claim_entry())
 
         # Delete the SD_DIGESTS_KEY if it is empty
         if len(sd_claims[SD_DIGESTS_KEY]) == 0:
             del sd_claims[SD_DIGESTS_KEY]
         else:
-            # ORDER ATTACK: Use the permutation of digests to hide information. Note that we work on byte-level, thus there must be at least 256 combinations (>5!) such that we hide something.
-            # We do not encrypt order here because there are not many bits that we can hide in the order. Otherwise we simply do not sort for now to keep the byte packages in order.
-            # TODO: We need to be careful because the claims could be nested in another disclosure, thus locking them away from our access unless we have the respective disclosure.
-            bytes_to_hide = int(math.log2(math.factorial(len(sd_claims[SD_DIGESTS_KEY])))) // 8
-            if self.enable_order_attack and bytes_to_hide > 0:
-                detail_split_to_hide = self._next_hidden_bytes(bytes_to_hide)
-                sd_claims[SD_DIGESTS_KEY] = unrank_permutation(rank=int.from_bytes(detail_split_to_hide, byteorder="big"), values=sd_claims[SD_DIGESTS_KEY])
-                print(f"[ORDER] Hiding bytes {detail_split_to_hide}, amount: {len(sd_claims[SD_DIGESTS_KEY])}")
+            # ORDER ATTACK: Use the permutation of digests to hide information. Note that there must be at least 9 attributes such that we hide a full byte, considering that a 2-byte ciphertext is needed to hide 1 byte of tracing data.
+            # We fall back to insecure encryption parameters here: as the space available for the cyphertext is limited, the random component r (see encryption_hkdf) is only one byte long.
+            digests = sd_claims[SD_DIGESTS_KEY]
+
+            # Largest whole-byte ciphertext that fits in the permutation rank.
+            permutation_count = math.factorial(len(digests))
+            # encrypt() produces two ciphertext bytes per plaintext byte.
+            capacity_bits = permutation_count.bit_length() - 1
+            message_bytes = capacity_bits // 16
+
+            if self.enable_order_attack and message_bytes > 0:
+                hidden_bytes = self._next_hidden_bytes(message_bytes)
+
+                ciphertext_bits = 16 * message_bytes
+                rank_bits = (permutation_count - 1).bit_length()
+                padding_bits = rank_bits - ciphertext_bits
+
+                while True:
+                    ciphertext = encrypt(
+                        self.hidden_encryption_key,
+                        hidden_bytes,
+                        length=message_bytes,
+                    )
+
+                    # we add padding as otherwise the resulting order is not random: there is a mismatch between the size of the ciphertext space and the number of possible permutations
+                    padding = secrets.randbits(padding_bits)
+                    rank = (
+                        (padding << ciphertext_bits)
+                        | int.from_bytes(ciphertext, byteorder="big")
+                    )
+                    if rank < permutation_count:
+                        break
+
+                sd_claims[SD_DIGESTS_KEY] = unrank_permutation(
+                    rank=rank,
+                    values=digests,
+                )
+
+                print(
+                    f"[ORDER] Hiding bytes {hidden_bytes}, "
+                    f"ciphertext: {ciphertext.hex()}, amount: {len(digests)}"
+                )
             else:
-                sd_claims[SD_DIGESTS_KEY].sort()
+                # In the paper we assume that digests are in random order
+                secrets.SystemRandom().shuffle(digests)
 
         return sd_claims
 
@@ -242,15 +292,15 @@ class SDJWTIssuer(SDJWTCommon):
                 header = header or {}
                 header[JSON_SER_DISCLOSURE_KEY] = [d.b64 for d in self.ii_disclosures]
 
-            hidden_bytes = self._next_hidden_bytes(16) # 128bit for the signature
             if self.enable_ecdsa_attack:
-                # ECDSA ATTACK: Hide even more bytes within the k-parameter of a ecdsa signature. See function for more details.
+                # ECDSA ATTACK: Hide bytes by rejection-sampling R of the ecdsa signature. See function for more details.
+                hidden_bytes = self._next_hidden_bytes(ECDSA_MESSAGE_BYTES)
                 add_signature(self.sd_jwt,
                     key,
                     alg=self._sign_alg,
                     protected=dumps(_protected_headers),
                     header=header,
-                    hidden_encryption_key=self.hidden_encryption_key,
+                    hidden_encryption_key=self.hidden_encryption_key, # this is used as a PRF key here
                     hidden_bytes=hidden_bytes,
                 )
             else:

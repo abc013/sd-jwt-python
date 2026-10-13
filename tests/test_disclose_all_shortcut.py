@@ -1,3 +1,5 @@
+# Copyright 2026 Daniel Fett
+
 from sd_jwt import __version__
 from sd_jwt.issuer import SDJWTIssuer
 from sd_jwt.utils.demo_utils import get_jwk

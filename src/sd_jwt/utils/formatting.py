@@ -1,3 +1,5 @@
+# Copyright 2026 Daniel Fett
+
 import json
 import logging
 from textwrap import fill, wrap

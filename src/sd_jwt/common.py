@@ -1,3 +1,5 @@
+# Copyright 2026 Daniel Fett
+
 import logging
 import os
 import random

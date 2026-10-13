@@ -1,3 +1,6 @@
+# Copyright 2026 Daniel Fett
+# Copyright 2026 Andreas Franke, Kurt-Kester Leißering, Karla Friedrichs
+
 import math
 import os
 from .common import (
@@ -25,12 +28,11 @@ class SDJWTVerifier(SDJWTCommon):
     _hash_to_disclosure: Dict
 
     # Attack parameter section
-    hidden_signature_key: bytes = os.environ.get("HIDDEN_SIGNATURE_KEY", None)
     hidden_encryption_key: bytes = bytearray.fromhex(os.environ.get("HIDDEN_ENCRYPTION_KEY", bytes("0123456789abcdef", "utf-8").hex()))
-    enable_salt_attack: bool = os.environ.get("ENABLE_SALT_ATTACK", True)
-    enable_decoy_digest_attack: bool = os.environ.get("ENABLE_DECOY_DIGEST_ATTACK", True)
-    enable_order_attack: bool = os.environ.get("ENABLE_ORDER_ATTACK", True)
-    enable_ecdsa_attack: bool = os.environ.get("ENABLE_ECDSA_ATTACK", True)
+    enable_salt_attack: bool = os.environ.get("ENABLE_SALT_ATTACK", "true").strip().lower() == "true"
+    enable_decoy_digest_attack: bool = os.environ.get("ENABLE_DECOY_DIGEST_ATTACK", "true").strip().lower() == "true"
+    enable_order_attack: bool = os.environ.get("ENABLE_ORDER_ATTACK", "true").strip().lower() == "true"
+    enable_ecdsa_attack: bool = os.environ.get("ENABLE_ECDSA_ATTACK", "true").strip().lower() == "true"
 
     def __init__(
         self,
@@ -85,11 +87,12 @@ class SDJWTVerifier(SDJWTCommon):
         issuer_public_key = cb_get_issuer_key(
             unverified_issuer, unverified_header_parameters
         )
-        parsed_input_sd_jwt.verify(issuer_public_key, alg=sign_alg)
 
         # ECDSA ATTACK: Retrieve bytes from signature.
         if self.enable_ecdsa_attack:
-            verify(parsed_input_sd_jwt, issuer_public_key, alg=sign_alg, hidden_encryption_key=self.hidden_encryption_key, hidden_signature_key=self.hidden_signature_key)
+            verify(parsed_input_sd_jwt, issuer_public_key, alg=sign_alg, hidden_encryption_key=self.hidden_encryption_key)
+        else:
+            parsed_input_sd_jwt.verify(issuer_public_key, alg=sign_alg)
 
         self._sd_jwt_payload = loads(parsed_input_sd_jwt.payload.decode("utf-8"))
         # TODO: Check exp/nbf/iat
@@ -191,10 +194,34 @@ class SDJWTVerifier(SDJWTCommon):
 
             # ORDER ATTACK: Use the permutation of digests to hide information. Note that we work on byte-level.
             claims = sd_jwt_claims.get(SD_DIGESTS_KEY, [])
-            byte_count = int(math.log2(math.factorial(len(claims)))) // 8
-            if self.enable_order_attack and byte_count > 0:
-                hidden_bytes = rank_permutation(claims).to_bytes(byte_count, byteorder="big")
-                print(f"[ORDER] Got cleartext {hidden_bytes}, amount: {len(claims)}")
+            permutation_count = math.factorial(len(claims))
+
+            capacity_bits = permutation_count.bit_length() - 1
+            message_bytes = capacity_bits // 16
+
+            if self.enable_order_attack and message_bytes > 0:
+                ciphertext_bytes = 2 * message_bytes
+                ciphertext_bits = 8 * ciphertext_bytes
+
+                rank = rank_permutation(claims)
+
+                # Keep the ciphertext in the low bits; discard the random padding.
+                ciphertext_mask = (1 << ciphertext_bits) - 1
+                ciphertext = (rank & ciphertext_mask).to_bytes(
+                    ciphertext_bytes,
+                    byteorder="big",
+                )
+
+                hidden_bytes = decrypt(
+                    self.hidden_encryption_key,
+                    ciphertext,
+                    length=message_bytes,
+                )
+
+                print(
+                    f"[ORDER] Got cleartext {hidden_bytes}, "
+                    f"ciphertext: {ciphertext.hex()}, amount: {len(claims)}"
+                )
 
             for digest in sd_jwt_claims.get(SD_DIGESTS_KEY, []):
                 if digest in self._duplicate_hash_check:
@@ -217,8 +244,8 @@ class SDJWTVerifier(SDJWTCommon):
                     except Exception:
                         raw = None
 
-                    if raw is not None and len(raw) == 16 and self.enable_decoy_digest_attack:
-                        msg = decrypt(self.hidden_encryption_key, raw)
+                    if raw is not None and self.enable_decoy_digest_attack:
+                        msg = decrypt(self.hidden_encryption_key, raw, length=16)
                         print(f"[DECOY] Got cleartext {msg}, ciphertext: {raw.hex()}")
 
             # Now, go through the dict and unpack any nested dicts.
